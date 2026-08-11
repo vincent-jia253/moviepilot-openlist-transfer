@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-import json
 import ssl
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -37,7 +36,8 @@ class OpenListClient:
             from urllib.parse import urlencode
             url += "?" + urlencode(params)
         body = __import__("json").dumps(json).encode("utf-8") if json is not None else None
-        request = Request(url, data=body, method=method, headers={"Authorization": self.token, "Content-Type": "application/json"} if authenticated else {"Content-Type": "application/json"})
+        headers = {"Authorization": self.token, "Content-Type": "application/json"} if authenticated else {"Content-Type": "application/json"}
+        request = Request(url, data=body, method=method, headers=headers)
         context = ssl.create_default_context() if self.verify_ssl else ssl._create_unverified_context()
         try:
             with urlopen(request, timeout=self.timeout, context=context) as response:
@@ -52,8 +52,21 @@ class OpenListClient:
         return self._request("POST", "/api/fs/get", json={"path": path}) or {}
 
     def list(self, path: str) -> List[Dict[str, Any]]:
-        data = self._request("POST", "/api/fs/list", json={"path": path, "page": 1, "per_page": 0, "refresh": False}) or {}
-        return data.get("content") or []
+        entries: List[Dict[str, Any]] = []
+        page = 1
+        per_page = 100
+        while True:
+            data = self._request(
+                "POST",
+                "/api/fs/list",
+                json={"path": path, "page": page, "per_page": per_page, "refresh": False},
+            ) or {}
+            content = data.get("content") or []
+            entries.extend(content)
+            total = int(data.get("total") or 0)
+            if not content or len(content) < per_page or (total and len(entries) >= total):
+                return entries
+            page += 1
 
     def mkdir(self, path: str) -> None:
         try:
